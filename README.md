@@ -41,16 +41,6 @@ npm install
 
 node server.js
 
-4. Database Schema
-ตารางหลักใน MySQL:
-
-users - เก็บข้อมูลผู้ใช้ (patient, doctor)
-
-patient_profiles - เก็บข้อมูลเพิ่มเติมของผู้ป่วย
-
-doctors - เก็บข้อมูลหมอ + specialty
-
-specialties - เก็บประเภทการรักษาของหมอ
 
 appointments - เก็บข้อมูลการนัดหมาย
 
