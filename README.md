@@ -40,8 +40,3 @@ npm install
 รันเซิร์ฟเวอร์ด้วยคำสั่ง
 
 node server.js
-
-
-appointments - เก็บข้อมูลการนัดหมาย
-
-doctor_availability - ตารางเวลาว่างของหมอ
