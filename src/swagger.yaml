@@ -1,0 +1,547 @@
+openapi: 3.0.3
+info:
+  title: Telemedicine API
+  version: 1.0.0
+  description: |
+    เอกสาร API สำหรับระบบจองนัดพบแพทย์ (Express + MySQL + JWT)
+    - ข้อความ error/validation เป็นภาษาไทย
+    - ใช้ JWT Bearer สำหรับ endpoint ที่ต้องยืนยันตัวตน
+
+servers:
+  - url: http://localhost:4000
+
+tags:
+  - name: Auth
+    description: สมัคร/เข้าสู่ระบบ
+  - name: Users
+    description: ข้อมูลผู้ใช้
+  - name: Doctors
+    description: จัดการแพทย์และเวลาว่าง
+  - name: Appointments
+    description: จองและดูนัดหมาย
+  - name: Reports
+    description: รายงาน
+
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: สมัครสมาชิก (patient หรือ doctor)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthRegisterRequest'
+            examples:
+              patient:
+                value:
+                  name: "Patient One"
+                  email: "pt@example.com"
+                  password: "secret123"
+                  role: "patient"
+              doctor:
+                value:
+                  name: "Dr John"
+                  email: "dr@example.com"
+                  password: "secret123"
+                  role: "doctor"
+                  specialty: 1
+      responses:
+        '200':
+          description: สมัครสำเร็จ (อาจคืน 201 ตามการติดตั้ง)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: ข้อมูลไม่ถูกต้อง
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                missingSpecialty:
+                  value: { message: "ต้องระบุ สาขา (specialty)" }
+        '409':
+          description: อีเมลซ้ำ
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                duplicate:
+                  value: { message: "อีเมลนี้ถูกใช้แล้ว" }
+  paths:
+  /api/health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: ตรวจสอบสถานะเซิร์ฟเวอร์
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message, status]
+                properties:
+                  message:
+                    type: string
+                    example: Server is Running.
+                  status:
+                    type: boolean
+                    example: true
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message, status]
+                properties:
+                  message:
+                    type: string
+                    example: Internal Server Error
+                  status:
+                    type: boolean
+                    example: false
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: เข้าสู่ระบบ (คืน JWT)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AuthLoginRequest' }
+            examples:
+              login:
+                value: { email: "pt@example.com", password: "secret123" }
+      responses:
+        '200':
+          description: สำเร็จ
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '400':
+          description: ข้อมูลไม่ถูกต้อง
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                emptyPassword:
+                  value: { message: "รหัสผ่าน ห้ามเว้นว่าง" }
+        '401':
+          description: อีเมลหรือรหัสผ่านไม่ถูกต้อง
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                invalidCreds:
+                  value: { message: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" }
+
+  /users/me:
+    get:
+      tags: [Users]
+      summary: ดูข้อมูลตัวเอง
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: ข้อมูลผู้ใช้
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+        '401':
+          description: ไม่มี token / token ไม่ถูกต้อง
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                noToken: { value: { message: "ไม่มีสิทธิ์เข้าถึง" } }
+
+    put:
+      tags: [Users]
+      summary: อัปเดตข้อมูลตัวเอง (ชื่อ/เบอร์/ที่อยู่)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserUpdateRequest' }
+            examples:
+              update:
+                value: { name: "Patient Updated", phone: "0812345678", address: "Bangkok" }
+      responses:
+        '200':
+          description: อัปเดตสำเร็จ
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+        '400':
+          description: ข้อมูลไม่ถูกต้อง
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /doctors:
+    get:
+      tags: [Doctors]
+      summary: ค้นหาแพทย์ตามสาขา
+      parameters:
+        - in: query
+          name: specialty
+          schema: { type: string }
+          description: คีย์เวิร์ดชื่อสาขา (เช่น "ผิวหนัง", "Dermatology")
+        - in: query
+          name: specialty_id
+          schema: { type: integer }
+          description: รหัสสาขา (เช่น 1)
+      responses:
+        '200':
+          description: รายชื่อแพทย์
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  doctors:
+                    type: array
+                    items: { $ref: '#/components/schemas/Doctor' }
+        '400':
+          description: ต้องมีอย่างน้อย 1 พารามิเตอร์ใน (specialty, specialty_id)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                needOne:
+                  value: { message: "ต้องระบุอย่างน้อยหนึ่งค่าใน specialty หรือ specialty_id" }
+
+  /doctors/{id}/slots:
+    post:
+      tags: [Doctors]
+      summary: เพิ่มเวลาว่าง (เฉพาะ doctor เจ้าของบัญชี)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slots]
+              properties:
+                slots:
+                  type: array
+                  description: |
+                    รายการเวลาว่าง (รองรับรูปแบบไทย/สากล เช่น "27 ก.ค. 68 9:00 น.", "2025-07-27T09:00:00+07:00")
+                  items:
+                    type: string
+            examples:
+              ex:
+                value:
+                  slots:
+                    - "27 ก.ค. 68 09:00 น."
+                    - "2025-07-27T10:00:00+07:00"
+      responses:
+        '201':
+          description: สร้างสำเร็จ
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  created:
+                    type: array
+                    items: { $ref: '#/components/schemas/DoctorSlot' }
+        '400':
+          description: รูปแบบเวลาไม่ถูกต้อง / ซ้ำ
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+    get:
+      tags: [Doctors]
+      summary: ดูเวลาว่างของหมอ
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: รายการเวลาว่าง
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slots:
+                    type: array
+                    items: { $ref: '#/components/schemas/DoctorSlot' }
+
+  /doctors/{id}/slots/{slotId}:
+    patch:
+      tags: [Doctors]
+      summary: แก้ไขเวลาว่าง (เฉพาะ doctor เจ้าของบัญชี)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: path
+          name: slotId
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slot_time]
+              properties:
+                slot_time:
+                  type: string
+                  description: เวลาใหม่ (รองรับไทย/สากล)
+      responses:
+        '200':
+          description: แก้ไขสำเร็จ
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slot: { $ref: '#/components/schemas/DoctorSlot' }
+        '400':
+          description: เวลาไม่ถูกต้อง/ทับซ้อน
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+    delete:
+      tags: [Doctors]
+      summary: ลบเวลาว่าง (เฉพาะ doctor เจ้าของบัญชี)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: path
+          name: slotId
+          required: true
+          schema: { type: integer }
+      responses:
+        '204':
+          description: ลบสำเร็จ (ไม่มีเนื้อหา)
+        '404':
+          description: ไม่พบ slot หรือไม่มีสิทธิ์
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /appointments:
+    post:
+      tags: [Appointments]
+      summary: จองนัดหมาย (patient เท่านั้น)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [doctor_id, slot_id]
+              properties:
+                doctor_id: { type: integer }
+                slot_id: { type: integer, description: "id ของ doctor_slots" }
+            examples:
+              ex:
+                value: { doctor_id: 1, slot_id: 12 }
+      responses:
+        '201':
+          description: จองสำเร็จ
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  appointment: { $ref: '#/components/schemas/Appointment' }
+        '400':
+          description: ข้อมูลไม่ถูกต้อง
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: slot นี้ถูกจองไปแล้ว
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                booked:
+                  value: { message: "slot นี้ถูกจองไปแล้ว" }
+
+  /appointments/me:
+    get:
+      tags: [Appointments]
+      summary: ดูนัดหมายของตนเอง (patient)
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: รายการนัดหมายของผู้ใช้
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  appointments:
+                    type: array
+                    items: { $ref: '#/components/schemas/Appointment' }
+
+  /appointments/doctor/me:
+    get:
+      tags: [Appointments]
+      summary: หมอดูนัดหมายของตัวเอง (doctor)
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: รายการนัดหมายของหมอ
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  appointments:
+                    type: array
+                    items: { $ref: '#/components/schemas/Appointment' }
+
+  /reports/appointments:
+    get:
+      tags: [Reports]
+      summary: รายงานจำนวนการนัดหมายรายวัน (doctor)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: date
+          required: true
+          schema: { type: string, format: date }
+          example: "2025-08-26"
+      responses:
+        '200':
+          description: สรุปจำนวนการนัดหมายของหมอในวันนั้น
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date: { type: string, format: date }
+                  total: { type: integer }
+        '400':
+          description: พารามิเตอร์ไม่ถูกต้อง
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        message: { type: string, example: "รหัสผ่าน ห้ามเว้นว่าง" }
+
+    User:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { type: string, enum: [patient, doctor] }
+        phone: { type: string, nullable: true }
+        address: { type: string, nullable: true }
+        specialty_id: { type: integer, nullable: true }
+
+    AuthRegisterRequest:
+      type: object
+      required: [name, email, password, role]
+      properties:
+        name: { type: string }
+        email: { type: string, format: email }
+        password: { type: string, minLength: 6 }
+        role: { type: string, enum: [patient, doctor] }
+        specialty:
+          type: integer
+          description: ต้องส่งเมื่อ role=doctor เท่านั้น
+
+    AuthLoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 6 }
+
+    AuthResponse:
+      type: object
+      properties:
+        token: { type: string }
+        user: { $ref: '#/components/schemas/User' }
+
+    Specialty:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+
+    Doctor:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string }
+        specialty:
+          oneOf:
+            - { $ref: '#/components/schemas/Specialty' }
+            - { type: integer, description: 'specialty_id เมื่อส่งแบบย่อ' }
+
+    DoctorSlot:
+      type: object
+      properties:
+        id: { type: integer }
+        doctor_id: { type: integer }
+        slot_time: { type: string, format: date-time, description: "เวลามาตรฐาน (ISO) ใน DB" }
+        slot_time_th: { type: string, description: "เวลาฉลากภาษาไทย (ถ้ามีการเก็บ)" }
+        is_booked: { type: boolean }
+
+    Appointment:
+      type: object
+      properties:
+        id: { type: integer }
+        doctor_id: { type: integer }
+        patient_id: { type: integer }
+        slot_id: { type: integer }
+        status: { type: string, example: "booked" }
+        created_at: { type: string, format: date-time }
+
+    UserUpdateRequest:
+      type: object
+      properties:
+        name: { type: string }
+        phone: { type: string }
+        address: { type: string }

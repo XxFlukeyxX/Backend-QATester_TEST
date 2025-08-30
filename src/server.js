@@ -5,14 +5,22 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import './config/db.js';
 import routes from './routes/index.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import swaggerUi from 'swagger-ui-express';
+import YAML from 'yamljs';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const swaggerPath = path.join(__dirname, 'swagger.yaml'); 
+const swaggerDocument = YAML.load(swaggerPath);
 
 app.use(cors());
 app.use(helmet());
 app.use(morgan('dev'));
 app.use(express.json());
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 app.get('/', (_req, res) => res.json({ ok: true, name: 'MediCareAPI' }));
 app.use(routes);
